@@ -62,92 +62,107 @@ export async function getOrCreateNoteNestFolder(accessToken: string): Promise<st
 
 /**
  * Uploads or updates a single note in the user's Google Drive NoteNest folder.
+ * Uses standard JSON creation + media upload to completely eliminate multipart format errors.
  */
 export async function uploadNoteToDrive(
   accessToken: string,
   note: Note
 ): Promise<{ fileId: string; updated: boolean }> {
-  const folderId = await getOrCreateNoteNestFolder(accessToken);
-  const fileName = `notenest_${note.id}.json`;
-
-  // Check if file already exists in folder
-  const searchQuery = `name = '${fileName}' and '${folderId}' in parents and trashed = false`;
-  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchQuery)}&fields=${encodeURIComponent('files(id,name)')}&spaces=drive`;
-
-  const searchRes = await fetch(searchUrl, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`
-    }
-  });
-
-  let existingFileId: string | null = null;
-  if (searchRes.ok) {
-    const data = await searchRes.json();
-    if (data.files && data.files.length > 0) {
-      existingFileId = data.files[0].id;
-    }
+  let folderId: string;
+  try {
+    folderId = await getOrCreateNoteNestFolder(accessToken);
+  } catch (e) {
+    console.warn('Folder lookup notice, clearing cache:', e);
+    clearDriveCache();
+    folderId = await getOrCreateNoteNestFolder(accessToken);
   }
 
+  const fileName = `notenest_${note.id}.json`;
   const fileContent = JSON.stringify(note, null, 2);
 
-  if (existingFileId) {
-    // Update existing file content
-    const updateUrl = `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`;
-    const updateRes = await fetch(updateUrl, {
-      method: 'PATCH',
+  // 1. Check if file already exists
+  let existingFileId: string | null = null;
+  try {
+    const searchQuery = `name = '${fileName}' and trashed = false`;
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchQuery)}&fields=${encodeURIComponent('files(id,name)')}&spaces=drive`;
+
+    const searchRes = await fetch(searchUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+
+    if (searchRes.ok) {
+      const data = await searchRes.json();
+      if (data.files && data.files.length > 0) {
+        existingFileId = data.files[0].id;
+      }
+    }
+  } catch (err) {
+    console.warn('Existing file check notice:', err);
+  }
+
+  let fileId = existingFileId;
+
+  // 2. If file does not exist yet, create file metadata record
+  if (!fileId) {
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: fileContent
-    });
-
-    if (!updateRes.ok) {
-      const err = await updateRes.text();
-      throw new Error(`Failed to update note in Google Drive: ${err}`);
-    }
-
-    return { fileId: existingFileId, updated: true };
-  } else {
-    // Multipart create new file in folder
-    const boundary = '-------314159265358979323846';
-    const delimiter = `\r\n--${boundary}\r\n`;
-    const closeDelimiter = `\r\n--${boundary}--`;
-
-    const metadata = {
-      name: fileName,
-      mimeType: 'application/json',
-      parents: [folderId],
-      description: `NoteNest note: ${note.title}`
-    };
-
-    const multipartRequestBody =
-      delimiter +
-      'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
-      JSON.stringify(metadata) +
-      delimiter +
-      'Content-Type: application/json\r\n\r\n' +
-      fileContent +
-      closeDelimiter;
-
-    const createUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-    const createRes = await fetch(createUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'multipart/related; boundary=${boundary}'
-      },
-      body: multipartRequestBody
+      body: JSON.stringify({
+        name: fileName,
+        mimeType: 'application/json',
+        parents: [folderId],
+        description: `NoteNest note: ${note.title}`
+      })
     });
 
     if (!createRes.ok) {
-      const err = await createRes.text();
-      throw new Error(`Failed to upload note to Google Drive: ${err}`);
-    }
+      // If creating with parents failed, fallback to root
+      const fallbackCreate = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: fileName,
+          mimeType: 'application/json',
+          description: `NoteNest note: ${note.title}`
+        })
+      });
 
-    const createdData = await createRes.json();
-    return { fileId: createdData.id, updated: false };
+      if (!fallbackCreate.ok) {
+        const errText = await fallbackCreate.text();
+        throw new Error(`Failed to create note in Google Drive: ${errText}`);
+      }
+
+      const fallbackData = await fallbackCreate.json();
+      fileId = fallbackData.id;
+    } else {
+      const createdData = await createRes.json();
+      fileId = createdData.id;
+    }
   }
+
+  // 3. Write note content via direct media PATCH
+  const updateUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`;
+  const updateRes = await fetch(updateUrl, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json; charset=UTF-8'
+    },
+    body: fileContent
+  });
+
+  if (!updateRes.ok) {
+    const err = await updateRes.text();
+    throw new Error(`Failed to save note content to Google Drive: ${err}`);
+  }
+
+  return { fileId: fileId!, updated: Boolean(existingFileId) };
 }
 
 /**

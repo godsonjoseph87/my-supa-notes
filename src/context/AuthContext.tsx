@@ -21,8 +21,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const driveResolveRef = useRef<((granted: boolean) => void) | null>(null);
   const loginResolveRef = useRef<((res: { success: boolean; error?: string }) => void) | null>(null);
 
-  // Read Google OAuth Client ID from Vite environment variable
-  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim();
+  // Optional custom Client ID stored in localStorage as fallback
+  const [customClientId, setCustomClientIdState] = useState<string>(() => {
+    try {
+      return localStorage.getItem('notenest_google_client_id') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const setCustomClientId = useCallback((id: string) => {
+    const trimmed = id.trim();
+    setCustomClientIdState(trimmed);
+    try {
+      if (trimmed) {
+        localStorage.setItem('notenest_google_client_id', trimmed);
+      } else {
+        localStorage.removeItem('notenest_google_client_id');
+      }
+    } catch {
+      // fallback
+    }
+  }, []);
+
+  // Read Google OAuth Client ID from Vite environment variable or localStorage fallback
+  const googleClientId = (
+    import.meta.env.VITE_GOOGLE_CLIENT_ID ||
+    customClientId ||
+    ''
+  ).trim();
+
   const isConfigured = Boolean(
     googleClientId &&
     googleClientId !== 'your-google-oauth-client-id' &&
@@ -298,6 +326,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         googleClientId,
         isConfigured,
+        setCustomClientId,
         accessToken,
         driveConnected,
         driveSyncStatus,

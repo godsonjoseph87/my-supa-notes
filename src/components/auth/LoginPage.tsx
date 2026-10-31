@@ -9,10 +9,17 @@ interface LoginPageProps {
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
-  const { isConfigured, loginWithGoogleAndDrive } = useAuth();
+  const { isConfigured, loginWithGoogleAndDrive, setCustomClientId } = useAuth();
   const [authError, setAuthError] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isGsiReady, setIsGsiReady] = useState(false);
+  const [manualClientId, setManualClientId] = useState('');
+
+  const handleSaveManualClientId = () => {
+    if (manualClientId.trim()) {
+      setCustomClientId(manualClientId.trim());
+    }
+  };
 
   // Verify Google Identity Services SDK availability
   useEffect(() => {
@@ -247,22 +254,35 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
               </div>
 
               <p className="text-[12.5px] text-amber-900/80 leading-relaxed">
-                To enable real Google Sign-In, provide your Google Cloud OAuth Client ID in your local environment file:
+                Google OAuth Client ID is not yet detected. Paste it below to connect immediately, or configure it in your deployment environment:
               </p>
 
-              <div className="p-2.5 bg-amber-100/70 border border-amber-300/60 rounded-xl font-mono text-[11.5px] text-amber-950 select-all overflow-x-auto">
-                VITE_GOOGLE_CLIENT_ID=your-client-id
+              {/* Instant Paste Input Fallback */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={manualClientId}
+                    onChange={(e) => setManualClientId(e.target.value)}
+                    placeholder="Paste Client ID (e.g. 2276354...apps.googleusercontent.com)"
+                    className="flex-1 px-3 py-2 text-[12px] bg-white border border-amber-300 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#5145FF]/40 font-mono shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveManualClientId}
+                    disabled={!manualClientId.trim()}
+                    className="px-3.5 py-2 bg-[#5145FF] hover:bg-[#4338CA] text-white text-[12px] font-semibold rounded-xl transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap shadow-sm"
+                  >
+                    Save & Enable
+                  </button>
+                </div>
               </div>
 
-              <div className="pt-1 text-[12px] text-amber-900/90 space-y-1">
-                <p className="font-medium">Setup Steps:</p>
-                <ol className="list-decimal pl-4 space-y-0.5 text-[11.5px]">
-                  <li>Create a project in Google Cloud Console</li>
-                  <li>Configure the OAuth consent screen</li>
-                  <li>Create a <strong>Web application</strong> OAuth Client</li>
-                  <li>Add <code className="bg-amber-200/60 px-1 py-0.5 rounded font-mono">http://localhost:3000</code> to <strong>Authorized JavaScript origins</strong></li>
-                  <li>Copy Client ID to <code className="bg-amber-200/60 px-1 py-0.5 rounded font-mono">.env.local</code> and restart Vite</li>
-                </ol>
+              <div className="pt-2 border-t border-amber-200/80 text-[11.5px] text-amber-900/90 space-y-1">
+                <p className="font-semibold text-amber-950">Cloudflare Pages Notice:</p>
+                <p className="leading-relaxed">
+                  Vite environment variables are bundled at build time. If you just added <code className="bg-amber-200/60 px-1 py-0.5 rounded font-mono">VITE_GOOGLE_CLIENT_ID</code> in Cloudflare Settings, go to <strong>Deployments</strong> &gt; click <strong>...</strong> on the latest deployment &gt; <strong>Retry deployment</strong> to compile them in.
+                </p>
               </div>
 
               <a

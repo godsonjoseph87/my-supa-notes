@@ -28,6 +28,7 @@ export interface AuthContextType {
   loading: boolean;
   googleClientId: string;
   isConfigured: boolean;
+  setCustomClientId: (id: string) => void;
   accessToken: string | null;
   driveConnected: boolean;
   driveSyncStatus: 'idle' | 'syncing' | 'synced' | 'error';

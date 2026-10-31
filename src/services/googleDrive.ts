@@ -4,14 +4,18 @@ export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 let cachedFolderId: string | null = null;
 
+export function clearDriveCache(): void {
+  cachedFolderId = null;
+}
+
 /**
  * Searches for or creates a dedicated 'NoteNest' folder in the user's Google Drive.
  */
 export async function getOrCreateNoteNestFolder(accessToken: string): Promise<string> {
   if (cachedFolderId) return cachedFolderId;
 
-  const searchUrl =
-    "https://www.googleapis.com/drive/v3/files?q=mimeType='application/vnd.google-apps.folder'+and+name='NoteNest'+and+trashed=false&fields=files(id,name)";
+  const searchQuery = "mimeType = 'application/vnd.google-apps.folder' and name = 'NoteNest' and trashed = false";
+  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchQuery)}&fields=${encodeURIComponent('files(id,name)')}&spaces=drive`;
 
   const searchRes = await fetch(searchUrl, {
     headers: {
@@ -21,13 +25,16 @@ export async function getOrCreateNoteNestFolder(accessToken: string): Promise<st
 
   if (!searchRes.ok) {
     const errorText = await searchRes.text();
-    throw new Error(`Failed to query Google Drive: ${errorText}`);
-  }
-
-  const data = await searchRes.json();
-  if (data.files && data.files.length > 0) {
-    cachedFolderId = data.files[0].id;
-    return cachedFolderId!;
+    console.warn(`Query Google Drive folder notice (${searchRes.status}): ${errorText}`);
+    if (searchRes.status === 401) {
+      throw new Error('Google Drive access expired. Please sign in again.');
+    }
+  } else {
+    const data = await searchRes.json();
+    if (data.files && data.files.length > 0) {
+      cachedFolderId = data.files[0].id;
+      return cachedFolderId!;
+    }
   }
 
   // Create 'NoteNest' folder
@@ -64,7 +71,8 @@ export async function uploadNoteToDrive(
   const fileName = `notenest_${note.id}.json`;
 
   // Check if file already exists in folder
-  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+'${folderId}'+in+parents+and+trashed=false&fields=files(id,name)`;
+  const searchQuery = `name = '${fileName}' and '${folderId}' in parents and trashed = false`;
+  const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchQuery)}&fields=${encodeURIComponent('files(id,name)')}&spaces=drive`;
 
   const searchRes = await fetch(searchUrl, {
     headers: {
@@ -127,7 +135,7 @@ export async function uploadNoteToDrive(
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`
+        'Content-Type': 'multipart/related; boundary=${boundary}'
       },
       body: multipartRequestBody
     });
@@ -143,12 +151,16 @@ export async function uploadNoteToDrive(
 }
 
 /**
- * Fetches all saved notes from the user's NoteNest folder in Google Drive.
+ * Fetches all saved notes from Google Drive:
+ * 1. Checks dedicated NoteNest folder.
+ * 2. Also checks any NoteNest note files across the drive for seamless recovery.
  */
 export async function fetchNotesFromDrive(accessToken: string): Promise<Note[]> {
   const folderId = await getOrCreateNoteNestFolder(accessToken);
 
-  const listUrl = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false+and+name+contains+'notenest_'&fields=files(id,name,modifiedTime)&pageSize=100`;
+  // Search files inside NoteNest folder
+  const folderQuery = `'${folderId}' in parents and trashed = false`;
+  const listUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(folderQuery)}&fields=${encodeURIComponent('files(id,name,mimeType,modifiedTime)')}&pageSize=100&spaces=drive`;
 
   const listRes = await fetch(listUrl, {
     headers: {
@@ -162,8 +174,34 @@ export async function fetchNotesFromDrive(accessToken: string): Promise<Note[]> 
   }
 
   const data = await listRes.json();
-  const files: Array<{ id: string; name: string }> = data.files || [];
+  const fileMap = new Map<string, { id: string; name: string; mimeType?: string }>();
 
+  (data.files || []).forEach((f: { id: string; name: string; mimeType?: string }) => {
+    if (f.mimeType !== 'application/vnd.google-apps.folder') {
+      fileMap.set(f.id, f);
+    }
+  });
+
+  // Also search for any files matching 'notenest' across Drive (in case folder moved or created earlier)
+  try {
+    const fallbackQuery = "name contains 'notenest' and trashed = false";
+    const fallbackUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(fallbackQuery)}&fields=${encodeURIComponent('files(id,name,mimeType,modifiedTime)')}&pageSize=100&spaces=drive`;
+    const fallbackRes = await fetch(fallbackUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (fallbackRes.ok) {
+      const fallbackData = await fallbackRes.json();
+      (fallbackData.files || []).forEach((f: { id: string; name: string; mimeType?: string }) => {
+        if (f.mimeType !== 'application/vnd.google-apps.folder') {
+          fileMap.set(f.id, f);
+        }
+      });
+    }
+  } catch {
+    // Non-blocking fallback
+  }
+
+  const files = Array.from(fileMap.values());
   const notes: Note[] = [];
 
   // Download content for each note file in parallel
@@ -178,7 +216,7 @@ export async function fetchNotesFromDrive(accessToken: string): Promise<Note[]> 
 
       if (fileRes.ok) {
         const noteJson = await fileRes.json();
-        if (noteJson && noteJson.id && noteJson.title) {
+        if (noteJson && noteJson.id && (noteJson.title || noteJson.content !== undefined)) {
           notes.push(noteJson);
         }
       }
@@ -202,7 +240,8 @@ export async function deleteNoteFromDrive(
     const folderId = await getOrCreateNoteNestFolder(accessToken);
     const fileName = `notenest_${noteId}.json`;
 
-    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='${fileName}'+and+'${folderId}'+in+parents&fields=files(id)`;
+    const searchQuery = `name = '${fileName}' and ('${folderId}' in parents or name contains 'notenest_')`;
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(searchQuery)}&fields=${encodeURIComponent('files(id)')}&spaces=drive`;
     const searchRes = await fetch(searchUrl, {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
@@ -210,11 +249,12 @@ export async function deleteNoteFromDrive(
     if (searchRes.ok) {
       const data = await searchRes.json();
       if (data.files && data.files.length > 0) {
-        const fileId = data.files[0].id;
-        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
+        for (const file of data.files) {
+          await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${accessToken}` }
+          });
+        }
         return true;
       }
     }
@@ -224,4 +264,5 @@ export async function deleteNoteFromDrive(
     return false;
   }
 }
+
 

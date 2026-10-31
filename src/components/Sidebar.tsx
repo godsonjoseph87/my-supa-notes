@@ -18,6 +18,7 @@ interface SidebarProps {
   categoryCounts: Record<NoteCategory, number>;
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
+  onSyncDrive?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -30,7 +31,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   trashCount,
   categoryCounts,
   isOpenMobile = false,
-  onCloseMobile
+  onCloseMobile,
+  onSyncDrive
 }) => {
   const { user, logout, driveConnected, requestDrivePermission } = useAuth();
   const [profileMenuOpen, setProfileMenuOpen] = React.useState(false);
@@ -162,18 +164,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
 
                 <div
-                  onClick={!driveConnected ? requestDrivePermission : undefined}
-                  className={`flex items-center justify-between px-3 py-1.5 rounded-lg transition-colors ${
-                    !driveConnected ? 'hover:bg-[#273858] cursor-pointer' : 'cursor-default'
-                  }`}
-                  title={driveConnected ? "Notes auto-sync to 'NoteNest' folder in Google Drive" : "Click to connect Google Drive"}
+                  onClick={() => {
+                    if (!driveConnected) {
+                      requestDrivePermission();
+                    } else {
+                      onSyncDrive?.();
+                    }
+                  }}
+                  className="flex items-center justify-between px-3 py-1.5 rounded-lg transition-colors hover:bg-[#273858] cursor-pointer"
+                  title={driveConnected ? "Click to manually re-sync with Google Drive" : "Click to connect Google Drive"}
                 >
                   <div className="flex items-center gap-2">
                     <Cloud className="w-3.5 h-3.5 text-[#8EA7E9]" />
                     <span>Google Drive</span>
                   </div>
                   {driveConnected ? (
-                    <span className="text-[10px] bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded font-medium">Synced</span>
+                    <span className="text-[10px] bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded font-medium hover:bg-emerald-900 transition-colors">
+                      Sync Now
+                    </span>
                   ) : (
                     <span className="text-[10px] bg-amber-950 text-amber-300 px-1.5 py-0.5 rounded font-medium hover:underline">Connect</span>
                   )}

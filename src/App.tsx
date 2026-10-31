@@ -88,49 +88,71 @@ const MainDashboard: React.FC = () => {
     }
   }, [user?.sub]);
 
+  // Sync notes from Google Drive
+  const handleSyncDrive = useCallback(async (isManual = false) => {
+    if (!accessToken || !user?.sub) return;
+
+    setDriveSyncStatus('syncing');
+    if (isManual) {
+      addToast('Syncing with Google Drive...', 'info');
+    }
+
+    try {
+      const driveNotes = await fetchNotesFromDrive(accessToken);
+
+      if (driveNotes && driveNotes.length > 0) {
+        setNotes((localNotes) => {
+          const mergedMap = new Map<string, Note>();
+          localNotes.forEach((n) => mergedMap.set(n.id, n));
+
+          driveNotes.forEach((driveNote) => {
+            const local = mergedMap.get(driveNote.id);
+            if (!local) {
+              mergedMap.set(driveNote.id, driveNote);
+            } else {
+              const driveTime = new Date(driveNote.updatedAt || 0).getTime();
+              const localTime = new Date(local.updatedAt || 0).getTime();
+              if (driveTime >= localTime) {
+                mergedMap.set(driveNote.id, driveNote);
+              }
+            }
+          });
+
+          const merged = Array.from(mergedMap.values());
+          saveNotes(merged, user.sub);
+          return merged;
+        });
+
+        // Auto-select the newest note from Google Drive so it's immediately visible
+        const sorted = [...driveNotes].sort(
+          (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+        );
+        if (sorted[0]?.id) {
+          setSelectedNoteId(sorted[0].id);
+        }
+
+        addToast(
+          `Synced ${driveNotes.length} note${driveNotes.length > 1 ? 's' : ''} from Google Drive`,
+          'success'
+        );
+      } else if (isManual) {
+        addToast('Google Drive synced: no new notes found', 'info');
+      }
+
+      setDriveSyncStatus('synced');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Drive sync failed';
+      console.warn('Drive sync error:', err);
+      setDriveSyncStatus('error');
+      addToast(`Drive sync: ${message}`, 'warning');
+    }
+  }, [accessToken, user?.sub, addToast, setDriveSyncStatus]);
+
   // Initial sync with Google Drive when authorized
   useEffect(() => {
     if (!accessToken || !user?.sub) return;
-
-    let isMounted = true;
-    setDriveSyncStatus('syncing');
-
-    fetchNotesFromDrive(accessToken)
-      .then((driveNotes) => {
-        if (!isMounted) return;
-        if (driveNotes && driveNotes.length > 0) {
-          setNotes((localNotes) => {
-            const mergedMap = new Map<string, Note>();
-            localNotes.forEach((n) => mergedMap.set(n.id, n));
-
-            driveNotes.forEach((driveNote) => {
-              const local = mergedMap.get(driveNote.id);
-              if (!local) {
-                mergedMap.set(driveNote.id, driveNote);
-              } else {
-                if (new Date(driveNote.updatedAt).getTime() > new Date(local.updatedAt).getTime()) {
-                  mergedMap.set(driveNote.id, driveNote);
-                }
-              }
-            });
-
-            const merged = Array.from(mergedMap.values());
-            saveNotes(merged, user.sub);
-            return merged;
-          });
-          addToast('Synced latest notes from Google Drive', 'info');
-        }
-        setDriveSyncStatus('synced');
-      })
-      .catch((err) => {
-        console.warn('Initial Drive sync error:', err);
-        if (isMounted) setDriveSyncStatus('error');
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [accessToken, user?.sub, addToast, setDriveSyncStatus]);
+    handleSyncDrive(false);
+  }, [accessToken, user?.sub, handleSyncDrive]);
 
   // Apply theme class to <html>
   useEffect(() => {
@@ -499,6 +521,7 @@ const MainDashboard: React.FC = () => {
         categoryCounts={categoryCounts}
         isOpenMobile={sidebarMobileOpen}
         onCloseMobile={() => setSidebarMobileOpen(false)}
+        onSyncDrive={() => handleSyncDrive(true)}
       />
 
       {/* Main App Content Area */}

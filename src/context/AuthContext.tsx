@@ -6,7 +6,7 @@ import {
   clearAuthSession,
   validateGoogleCredential
 } from '../utils/auth';
-import { DRIVE_SCOPE } from '../services/googleDrive';
+import { DRIVE_SCOPE, clearDriveCache } from '../services/googleDrive';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -39,6 +39,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = useCallback(() => {
     clearAuthSession();
+    clearDriveCache();
     setUser(null);
     setAccessToken(null);
     setDriveSyncStatus('idle');

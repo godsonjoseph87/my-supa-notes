@@ -109,8 +109,12 @@ export function loadAuthSession(): AuthUser | null {
       return null;
     }
 
-    // If ID token is a standard 3-part JWT, verify claims
-    if (session.idToken && session.idToken.includes('.')) {
+    // Only verify via parseJwt if idToken is a standard 3-part JWT (starts with eyJ)
+    if (
+      typeof session.idToken === 'string' &&
+      session.idToken.startsWith('eyJ') &&
+      session.idToken.split('.').length === 3
+    ) {
       const payload = parseJwt(session.idToken);
       if (!payload || Date.now() >= payload.exp * 1000) {
         clearAuthSession();

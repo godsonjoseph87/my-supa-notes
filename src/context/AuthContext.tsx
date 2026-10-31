@@ -109,10 +109,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const expiresInMs = (tokenResponse.expires_in || 3600) * 1000;
           const tokenExp = Date.now() + expiresInMs;
 
+          // Verify that Google Drive scope was explicitly granted
+          const hasDriveScope = window.google?.accounts?.oauth2?.hasGrantedAllScopes
+            ? window.google.accounts.oauth2.hasGrantedAllScopes(tokenResponse, DRIVE_SCOPE)
+            : Boolean(tokenResponse.scope && tokenResponse.scope.includes('drive.file'));
+
           setAccessToken(token);
 
           // If in login flow, fetch Google profile and establish session
           if (loginResolveRef.current) {
+            if (!hasDriveScope) {
+              loginResolveRef.current({
+                success: false,
+                error:
+                  'Google Drive permission is required. Please check the Google Drive permission checkbox during sign-in to allow syncing.'
+              });
+              loginResolveRef.current = null;
+              return;
+            }
+
             try {
               const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                 headers: { Authorization: `Bearer ${token}` }
@@ -160,7 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
 
             if (driveResolveRef.current) {
-              driveResolveRef.current(true);
+              driveResolveRef.current(hasDriveScope);
               driveResolveRef.current = null;
             }
           }
@@ -219,7 +234,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       loginResolveRef.current = resolve;
-      tokenClientRef.current.requestAccessToken({ prompt: 'select_account' });
+      // Force prompt='consent select_account' so Google always requests Drive permission
+      tokenClientRef.current.requestAccessToken({ prompt: 'consent select_account' });
     });
   }, [isConfigured, setupTokenClient]);
 
@@ -228,7 +244,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return new Promise((resolve) => {
       if (tokenClientRef.current) {
         driveResolveRef.current = resolve;
-        tokenClientRef.current.requestAccessToken({ prompt: '' });
+        tokenClientRef.current.requestAccessToken({ prompt: 'consent' });
       } else {
         resolve(false);
       }

@@ -135,6 +135,9 @@ export async function uploadNoteToDrive(
 
       if (!fallbackCreate.ok) {
         const errText = await fallbackCreate.text();
+        if (fallbackCreate.status === 403 && errText.includes('ACCESS_TOKEN_SCOPE_INSUFFICIENT')) {
+          throw new Error('Google Drive permission is missing. Please click Google Drive in the sidebar to grant permission.');
+        }
         throw new Error(`Failed to create note in Google Drive: ${errText}`);
       }
 
@@ -159,6 +162,9 @@ export async function uploadNoteToDrive(
 
   if (!updateRes.ok) {
     const err = await updateRes.text();
+    if (updateRes.status === 403 && err.includes('ACCESS_TOKEN_SCOPE_INSUFFICIENT')) {
+      throw new Error('Google Drive permission is missing. Please click Google Drive in the sidebar to grant permission.');
+    }
     throw new Error(`Failed to save note content to Google Drive: ${err}`);
   }
 

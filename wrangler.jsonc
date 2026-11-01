@@ -5,7 +5,6 @@
   "compatibility_date": "2026-10-31",
   "assets": {
     "directory": "./dist",
-    "base_path": "/notenest",
     "not_found_handling": "single-page-application"
   }
 }

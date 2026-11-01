@@ -617,23 +617,37 @@ const MainDashboard: React.FC = () => {
   );
 };
 
+const rawBase = import.meta.env.BASE_URL || '/';
+const BASE_PATH = rawBase.endsWith('/') ? rawBase.slice(0, -1) : rawBase;
+
+function getRoutePath(pathname: string): string {
+  if (BASE_PATH && pathname.startsWith(BASE_PATH)) {
+    const stripped = pathname.slice(BASE_PATH.length);
+    return stripped.startsWith('/') ? stripped : '/' + stripped;
+  }
+  return pathname || '/';
+}
+
 export const App: React.FC = () => {
-  // Simple, robust client-side routing tracking window.location.pathname
+  // Path-aware client-side routing supporting base URL (e.g. /notenest/)
   const [currentPath, setCurrentPath] = useState<string>(
-    () => window.location.pathname || '/'
+    () => getRoutePath(window.location.pathname)
   );
 
   const navigate = useCallback((to: string) => {
-    if (window.location.pathname + window.location.search !== to) {
-      window.history.pushState({}, '', to);
+    const cleanRoute = getRoutePath(to.split('?')[0]);
+    const queryString = to.includes('?') ? '?' + to.split('?')[1] : '';
+    const fullTarget = `${BASE_PATH}${cleanRoute === '/' ? '' : cleanRoute}${queryString}` || '/';
+
+    if (window.location.pathname + window.location.search !== fullTarget) {
+      window.history.pushState({}, '', fullTarget);
     }
-    const cleanPath = to.split('?')[0] || '/';
-    setCurrentPath(cleanPath);
+    setCurrentPath(cleanRoute);
   }, []);
 
   useEffect(() => {
     const handlePopState = () => {
-      setCurrentPath(window.location.pathname || '/');
+      setCurrentPath(getRoutePath(window.location.pathname));
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
